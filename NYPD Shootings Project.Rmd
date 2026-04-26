@@ -1,0 +1,160 @@
+---
+title: "NYPD Shooting Data"
+author: "B. Tucker"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 80)
+)
+
+library(tidyverse)
+library(rcompanion)
+```
+
+## Reading in and tidying the data
+
+This dataset is the NYPD Shootings dataset used in class. This data spans over a decade (2010 - 2021) and includes: victim and perpetrator age, sex, and race, fatal versus non fatal events, location, borough, date, time, and precinct/jurisdiction information. We will be using this data to perform some analysis and answer whether there is an association between a victim's race and their age group.
+
+First, we will read the data in.
+
+```{r}
+
+##Read in the csv file in and assign that to our data frame.
+
+NYPD_Shootings <- read_csv("C:/Users/kuros/Downloads/ARCHIVED_NYPD_Shooting_Incident_Data__Historic_.csv")
+```
+
+Next, we'll look at an overview of the data.
+```{r}
+## Use the glimpse function to look at column information
+glimpse(NYPD_Shootings)
+```
+
+After reviewing the column information, we'll mutate columns for proper object classification. We'll also eliminate columns we don't need, and filter out unknown or missing (NA) values.
+
+```{r}
+NYPD_Shootings <- NYPD_Shootings %>%
+  filter(!is.na(VIC_RACE),
+         !is.na(VIC_AGE_GROUP),
+         VIC_RACE != "UNKNOWN",
+         VIC_AGE_GROUP != "UNKNOWN",
+         VIC_AGE_GROUP != "1022") %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE),
+         BORO = str_to_title(BORO),
+         PERP_AGE_GROUP = factor(PERP_AGE_GROUP),
+         VIC_AGE_GROUP = factor(VIC_AGE_GROUP,
+                                levels = c("<18", "18-24", "25-44", "45-64", "65+")),
+         PERP_RACE = factor(PERP_RACE),
+         VIC_RACE = factor(VIC_RACE),
+         PERP_SEX = factor(PERP_SEX),
+         VIC_SEX = factor(VIC_SEX)) %>%
+  select(-c(INCIDENT_KEY, `LOC_OF_OCCUR_DESC`, PRECINCT, JURISDICTION_CODE, `LOC_CLASSFCTN_DESC`, `LOCATION_DESC`,
+          STATISTICAL_MURDER_FLAG, X_COORD_CD, Y_COORD_CD, Latitude, Longitude, `Lon_Lat`))
+
+## Lets look at NYPD_Shootings now
+
+NYPD_Shootings
+```
+
+Now that we have transformed and cleaned our data, we can move into the analysis portion
+
+
+## Analyzing and visualizing the data
+
+To begin, lets examine victimization by age group
+
+```{r}
+
+NYPD_Shootings %>%
+  count(VIC_AGE_GROUP) %>%
+  ggplot(aes(x= VIC_AGE_GROUP, y = n))+
+  geom_col()
+```
+
+Now we'll look at victimization by race
+
+```{r}
+
+NYPD_Shootings %>%
+  count(VIC_RACE) %>%
+  ggplot(aes(x= VIC_RACE, y = n))+
+  geom_col() +
+  scale_x_discrete(labels = abbreviate)
+
+## Utilize scale_x_discrete to abbreviate the labels on the x axis
+
+```
+
+Now that we've looked at victimization by age and by race, lets model what proportion of victims are of specific age groups across racial categories.
+
+```{r}
+
+counts <- NYPD_Shootings %>%
+  count(VIC_RACE)
+
+ggplot(NYPD_Shootings, aes(x = VIC_RACE, fill = VIC_AGE_GROUP)) +
+  geom_bar(position = "fill") +
+  geom_text(
+    data = counts,
+    aes(x = VIC_RACE, y = 1.05, label = paste0("n = ", n)),
+    inherit.aes = FALSE
+  ) +
+  labs(
+    title = "Age Distribution by Race (with Sample Size)",
+    x = "Race",
+    y = "Proportion"
+  ) +
+  scale_x_discrete(labels = abbreviate)
+```
+
+This visual allows us to see the proportion of victim age groups by racial category. We include the category n size to provide some context. 
+
+
+While the visualization may appear to indicate notable stratification for specific age group distributions and specific races, lets look at whether there's an association between victim race and victim age group.
+
+```{r, error=FALSE, warning=FALSE, message=FALSE}
+
+## We'll run a chi-square test to check, and also use a Cramer's V test to look at effect size.
+
+chi_square_data <- table(NYPD_Shootings$VIC_RACE,
+                         NYPD_Shootings$VIC_AGE_GROUP)
+
+chisq.test(chi_square_data)
+
+```
+
+When we run this data, we see there's a very small p-value, indicating a statistically significant association between victim race and age group. Lets now review the proportions of that data to see how victims are actually distributed across age groups
+
+```{r}
+## To avoid proportions printing in scientific notation, multiply by 100 to create a readable decimal.
+
+prop.table(chi_square_data, 1) * 100
+```
+
+
+We could stop here, but we'd be remiss to not examine effect size, which will suggest to us how significant these statistical findings may actually be.
+
+
+```{r}
+cramer_v <- cramerV(chi_square_data)
+
+cramer_v
+
+```
+
+## Conclusion & Bias
+
+After performing all our analysis, we get a clearer picture of what is happening, and an answer to our question.
+
+Our chi-square test indicated a statistically significant association between victim race and victim age group, and proportion tables showed that the distribution of age does differ by race. We saw that across all races, the distribution was most concentrated in the 18-24 and 25-44 age groups, but some racial groups show higher proportions of victims in specific age groups. The <18 age group appears to have higher proportions of victims among the Black and Black/Hispanic racial groups, while the 45-64 and 65+ age groups appear to have higher proportions of White victims. Cramér’s V indicates that the effect size is weak at ~0.06, however. This indicates that while there are differences in age distribution across racial groups, the association is weak and of limited practical significance. 
+
+We do have to consider that we removed unknown values, and this may have an impact on the results. This choice introduces bias, because we are only focusing on values we have data for. But this doesn't eliminate that a victim whose information was unknown existed. There is also some natural bias in the choice to use this dataset, which focuses on crime in New York City, and reporting on crime in this city has historically seen unequal reporting by both police and the public. 
